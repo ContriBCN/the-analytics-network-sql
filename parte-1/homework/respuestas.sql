@@ -136,9 +136,9 @@ ORDER BY producto
 -- para contar la cantidad de gente que ingresa a tienda, uno para las tiendas de Latinoamerica y otro 
 -- para Europa. Obtener en una unica tabla, las entradas a tienda de ambos sistemas.
 
-SELECT	tienda, CAST (fecha AS date), conteo FROM stg.market_count 
+SELECT	tienda, CAST (CAST(fecha AS text) AS date), conteo FROM stg.market_count 
 UNION ALL
-SELECT	* FROM stg.super_store_count
+SELECT	tienda, CAST (CAST (fecha AS text) AS date), conteo FROM stg.super_store_count
 
 -- Cuales son los productos disponibles para la venta (activos) de la marca Phillips?
 
