@@ -153,7 +153,7 @@ SELECT	SUM (venta),
 FROM stg.order_line_sale 
 GROUP BY tienda, moneda
 
--- C13.ual es el precio promedio de venta de cada producto en las distintas monedas? Recorda que los valores
+-- 13.ual es el precio promedio de venta de cada producto en las distintas monedas? Recorda que los valores
 -- de venta, impuesto, descuentos y creditos es por el total de la linea.
 
 SELECT	producto, 
@@ -251,16 +251,22 @@ ORDER BY tienda, sku
 -- 7.Calcular la cantidad de unidades vendidas por material. Para los productos que no tengan material usar 
 -- 'Unknown', homogeneizar los textos si es necesario.
 
+WITH CTE_material AS (
 SELECT 
-	SUM (cantidad),
+	*, 
 	CASE WHEN material IS NULL THEN 'Unknown'
 	when material = 'PLASTICO' THEN 'Plastico'
 	when material = 'plastico' THEN 'Plastico'
-	ELSE material END
+	ELSE material END AS material_consolidado
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.product_master AS PM
 	ON OLS.producto = PM.codigo_producto
-GROUP BY material
+)
+SELECT 
+	material_consolidado,
+	SUM (cantidad)
+FROM CTE_material
+GROUP BY material_consolidado
 
 -- 8.Mostrar la tabla order_line_sales agregando una columna que represente el valor de venta bruta en cada 
 -- linea convertido a dolares usando la tabla de tipo de cambio.
