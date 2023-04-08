@@ -63,8 +63,7 @@ LEFT JOIN stg.product_master AS PM
 GROUP BY mes_venta, subcategoria
 ORDER BY mes_venta
 
--- ROI por categoria de producto. ROI = Valor promedio de inventario / ventas netas (MEDIO RESUELTO)
-						-- Falta agrupar ROI por categoria --
+-- ROI por categoria de producto. ROI = Valor promedio de inventario / ventas netas 
 
 WITH CTE_inventario AS (
 	SELECT
@@ -89,12 +88,13 @@ CTE_ventas AS (
 )
 SELECT 
 	categoria,
-	coalesce ((inv.inventario_promedio/ventas_netas_USD),0) AS ROI
+	ROUND ((SUM(inventario_promedio)/SUM(ventas_netas_USD)*100),2) AS ROI
 FROM CTE_inventario AS INV
 LEFT JOIN CTE_ventas AS OLS
-ON INV.tienda = OLS.tienda
+	ON INV.tienda = OLS.tienda
 LEFT JOIN stg.product_master AS PM
 	ON INV.sku = PM.codigo_producto
+GROUP BY categoria
 
 -- AOV (Average order value), valor promedio de la orden.
 
@@ -168,7 +168,15 @@ ORDER BY OLS.orden
 -- SUPPLY CHAIN
 -- Costo de inventario promedio por tienda
 
-
+SELECT
+	tienda,
+	(SUM(inicial)+SUM(final))/2 AS inventario_promedio,
+	((SUM(inicial)+SUM(final))/2) * MAX(C.costo_promedio_usd) AS costo_promedio
+FROM stg.inventory AS INV
+LEFT JOIN stg.cost AS C
+	ON INV.sku = C.codigo_producto
+GROUP BY tienda
+ORDER BY tienda
 
 -- Costo del stock de productos que no se vendieron por tienda
 
@@ -250,3 +258,4 @@ SELECT * FROM stg.tabla_1 AS T1 INNER JOIN stg.tabla_2 AS T2 ON T1.id = T2.id
 -- Left Join selecciona todos los registros de la tabla de la izquierda (tabla_1), y los registros que 
 -- coinciden con la tabla de la derecha (tabla_2)
 SELECT * FROM stg.tabla_1 AS T1 LEFT JOIN stg.tabla_2 AS T2 ON T1.id = T2.id 
+
