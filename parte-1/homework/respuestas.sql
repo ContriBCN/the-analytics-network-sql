@@ -252,21 +252,18 @@ ORDER BY tienda, sku
 -- 'Unknown', homogeneizar los textos si es necesario.
 
 WITH CTE_material AS (
-SELECT 
-	*, 
-	CASE WHEN material IS NULL THEN 'Unknown'
+	SELECT *, 
+	CASE WHEN material = 'Metal' THEN 'Metal'
 	when material = 'PLASTICO' THEN 'Plastico'
 	when material = 'plastico' THEN 'Plastico'
-	ELSE material END AS material_consolidado
-FROM stg.order_line_sale AS OLS
-LEFT JOIN stg.product_master AS PM
-	ON OLS.producto = PM.codigo_producto
+	ELSE material END AS material_group
+	FROM stg.order_line_sale AS OLS
+	LEFT JOIN stg.product_master AS PM
+		ON OLS.producto = PM.codigo_producto
 )
-SELECT 
-	material_consolidado,
-	SUM (cantidad)
+SELECT material_group, SUM (cantidad)
 FROM CTE_material
-GROUP BY material_consolidado
+GROUP BY material_group
 
 -- 8.Mostrar la tabla order_line_sales agregando una columna que represente el valor de venta bruta en cada 
 -- linea convertido a dolares usando la tabla de tipo de cambio.
@@ -309,3 +306,108 @@ FROM stg.order_line_sale OLS
 LEFT JOIN stg.product_master PM
 	ON OLS.producto = PM.codigo_producto
 GROUP BY orden
+
+
+-- Clase 4 de 0 a Messi
+
+-- 1.Crear un backup de la tabla product_master. Utilizar un esquema llamada "bkp" y agregar un prefijo 
+-- al nombre de la tabla con la fecha del backup en forma de numero entero.
+
+CREATE SCHEMA bkp;
+
+SELECT 
+	*, 
+	current_date AS bkp_date
+INTO bkp.product_master_20230404
+FROM stg.product_master
+
+-- 2.Hacer un update a la nueva tabla (creada en el punto anterior) de product_master agregando la leyendo 
+-- "N/A" para los valores null de material y color. Pueden utilizarse dos sentencias.
+
+UPDATE bkp.product_master_20230404
+SET material = 'N/A'
+WHERE material is null;
+
+UPDATE bkp.product_master_20230404
+SET color = 'N/A'
+WHERE color is null
+
+-- 3.Hacer un update a la tabla del punto anterior, actualizando la columa "is_active", desactivando todos 
+-- los productos en la subsubcategoria "Control Remoto".
+
+UPDATE bkp.product_master_20230404
+SET is_active = '1'
+WHERE subsubcategoria = 'Control Remoto';
+
+-- 4.Agregar una nueva columna a la tabla anterior llamada "is_local" indicando los productos producidos 
+-- en Argentina y fuera de Argentina.
+
+ALTER TABLE bkp.product_master_20230404
+ADD COLUMN is_local boolean
+
+UPDATE bkp.product_master_20230404
+SET is_local = 'True'
+WHERE origen = 'Argentina' 
+
+UPDATE bkp.product_master_20230404
+SET is_local = 'False' 
+WHERE origen <> 'Argentina'
+
+-- 5.Agregar una nueva columna a la tabla de ventas llamada "line_key" que resulte ser la concatenacion 
+-- de el numero de orden y el codigo de producto.
+
+SELECT 
+	*, 
+	concat (orden , codigo_producto) AS line_key
+INTO bkp.order_line_sale 
+FROM stg.order_line_sale OLS
+LEFT JOIN stg.product_master PM
+	ON OLS.producto = PM.codigo_producto
+	
+-- 6.Eliminar todos los valores de la tabla "order_line_sale" para el POS 1.
+
+DELETE FROM bkp.order_line_sale WHERE pos = '1'
+
+-- 7.Crear una tabla llamada "employees" (por el momento vacia) que tenga un id (creado de forma 
+-- incremental), nombre, apellido, fecha de entrada, fecha salida, telefono, pais, provincia, codigo_tienda, 
+-- posicion. Decidir cual es el tipo de dato mas acorde.
+
+DROP TABLE bkp.employees IF EXISTS;
+CREATE  TABLE bkp.employees (
+						id serial primary key,
+						nombre VARCHAR,
+						apellido VARCHAR,
+						fecha_entrada DATE,
+						fecha_salida DATE,
+						telefono BIGINT,
+						pais VARCHAR,
+						provincia VARCHAR,
+						codigo_tienda INTEGER,
+						posicion VARCHAR)
+					
+-- 8.Insertar nuevos valores a la tabla "employees" para los siguientes 4 empleados:
+-- 	Juan Perez, 2022-01-01, telefono +541113869867, Argentina, Santa Fe, tienda 2, Vendedor.
+-- 	Catalina Garcia, 2022-03-01, Argentina, Buenos Aires, tienda 2, Representante Comercial
+--	Ana Valdez, desde 2020-02-21 hasta 2022-03-01, España, Madrid, tienda 8, Jefe Logistica
+--	Fernando Moralez, 2022-04-04, España, Valencia, tienda 9, Vendedor.
+
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
+	VALUES ('Juan', 'Perez', '2022-01-01',NULL, '541113869867' , 'Argentina', 'Santa Fe', '2', 'Vendedor')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
+	VALUES ('Catalina', 'Garcia', '2022-03-01', NULL,NULL,'Argentina', 'Buenos Aires', '2', 'Representante Comercial')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
+	VALUES ('Ana', 'Valdez', '2020-02-21' ,'2022-03-01',NULL, 'España', 'Madrid', '8', 'Jefe Logistica')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
+	VALUES ('Fernando', 'Moralez', '2022-04-04',NULL, NULL, 'España', 'Valencia', '9', 'Vendedor')
+
+-- 9.Crear un backup de la tabla "cost" agregandole una columna que se llame "last_updated_ts" que sea 
+-- el momento exacto en el cual estemos realizando el backup en formato datetime.
+
+SELECT 
+	*,
+	current_date::timestamp AS last_update_ts
+INTO stg.cost_update
+FROM stg.cost
+
+-- 10.El cambio en la tabla "order_line_sale" en el punto 6 fue un error y debemos volver la tabla a su 
+-- estado original, como lo harias?
