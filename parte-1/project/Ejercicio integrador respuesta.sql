@@ -120,28 +120,13 @@ LEFT JOIN stg.monthly_average_fx_rate AS FX
 	ON SUBSTRING (CAST (OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST (FX.mes AS text) FROM 1 FOR 7)
 GROUP BY FX.mes
 
--- Tasa de impuesto. Impuestos / Ventas netas (SIN RESOLVER)
+-- Tasa de impuesto. Impuestos / Ventas netas 
 
-WITH CTE_ventas_netas AS (
-	SELECT 
-		EXTRACT (month FROM fecha) AS mes_venta,
-		ROUND (SUM (CASE WHEN moneda = 'ARS' THEN ((ols.venta-OLS.impuestos)/FX.cotizacion_usd_peso)
-		WHEN moneda = 'EUR' THEN ((OLS.venta-OLS.impuestos)/FX.cotizacion_usd_eur)
-		ELSE (OLS.venta-OLS.impuestos)/FX.cotizacion_usd_uru END),2)  AS ventas_netas_USD
-	FROM stg.order_line_sale AS OLS
-	LEFT JOIN stg.monthly_average_fx_rate AS FX
-		ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
-	GROUP BY mes_venta
-)
-	SELECT
-		ROUND (SUM (CASE WHEN moneda = 'ARS' THEN ((impuestos/CTE_ventas_netas)/FX.cotizacion_usd_peso)
-			WHEN moneda = 'EUR' THEN ((impuestos/CTE_ventas_netas)/FX.cotizacion_usd_eur)
-		 	ELSE (impuestos/CTE_ventas_netas)/FX.cotizacion_usd_uru END),2)
-	FROM stg.order_line_sale AS OLS
-	LEFT JOIN stg.monthly_average_fx_rate AS FX
-	LEFT JOIN CTE_ventas_netas ON FX.mes = CTE_ventas_netas.mes_venta
-		ON SUBSTRING (CAST (OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST (FX.mes AS text) FROM 1 FOR 7)
-	GROUP BY CTE_ventas_netas.mes_venta
+SELECT
+	ROUND (SUM(impuestos),2) AS total_impuestos,
+	ROUND (SUM(venta+creditos+descuento),2) AS ventas_netas,
+	ROUND (SUM(impuestos)/SUM(venta+creditos+descuento),2) as tasa_impuestos
+FROM stg.order_line_sale 
 
 -- Cantidad de creditos otorgados
 
@@ -152,19 +137,21 @@ FROM stg.order_line_sale
 GROUP BY mes
 
 -- Valor pagado final por order de linea. Valor pagado: Venta - descuento + impuesto - credito
--- (SIN RESOLVER) -- LOS RESULTADOS SON TODOS NULL
-	
+
 SELECT
-	orden,
-	COALESCE (SUM (CASE WHEN moneda = 'ARS' THEN ((((venta-descuento)+impuestos)-creditos)/FX.cotizacion_usd_peso)
-		 WHEN moneda = 'EUR' THEN ((((venta-descuento)+impuestos)-creditos)/FX.cotizacion_usd_eur)
-		 ELSE ((((venta-descuento)+impuestos)-creditos)/FX.cotizacion_usd_uru) END),0)
+	orden, 
+	COALESCE 
+		(SUM(CASE WHEN moneda = 'ARS' THEN 
+			 ((venta - COALESCE (descuento,0) + COALESCE (impuestos,0) - COALESCE (creditos,0))/FX.cotizacion_usd_peso)
+			WHEN moneda = 'EUR' THEN
+		 	((venta - COALESCE (descuento,0) + COALESCE (impuestos,0) - COALESCE (creditos,0))/FX.cotizacion_usd_eur)
+			ELSE ((venta - COALESCE (descuento,0) + COALESCE (impuestos,0) - COALESCE (creditos,0))/FX.cotizacion_usd_uru) END),0)
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.monthly_average_fx_rate AS FX
 	ON OLS.fecha = FX.mes
 GROUP BY OLS.orden
 ORDER BY OLS.orden
-		
+	
 -- SUPPLY CHAIN
 -- Costo de inventario promedio por tienda
 
@@ -178,13 +165,37 @@ LEFT JOIN stg.cost AS C
 GROUP BY tienda
 ORDER BY tienda
 
+-- Crear tabla "return_movements"
+
+CREATE  TABLE stg.return_movements (
+						orden_venta VARCHAR,
+						envio VARCHAR,
+						item VARCHAR,
+						cantidad INT,
+						id_movimiento BIGINT,
+						desde VARCHAR,
+						hasta VARCHAR,
+						recibido_por VARCHAR,
+						fecha DATE)
+
 -- Costo del stock de productos que no se vendieron por tienda
 
-
+SELECT
+	sku,
+	sum((INV.final) * (C.costo_promedio_usd)) AS coste_stock
+FROM stg.inventory AS INV
+LEFT JOIN stg.cost AS C
+	ON INV.sku = C.codigo_producto
+GROUP BY sku
 
 -- Cantidad y costo de devoluciones
 
-
+SELECT 
+	SUM (R.cantidad) AS cantidad_devoluciones, 
+	SUM (C.costo_promedio_usd) * SUM(R.cantidad) AS coste_devoluciones
+FROM stg.return_movements AS R
+LEFT JOIN stg.cost AS C
+	ON R.item = C.codigo_producto 
 
 -- Tiendas
 -- Ratio de conversion. Cantidad de ordenes generadas / Cantidad de gente que entra
@@ -211,12 +222,12 @@ CTE_total_conteo AS (
 	)
 SELECT 
 	CTE_total_ordenes.tienda,
-	ROUND ((SUM (CTE_total_ordenes.total_orden)/SUM (CTE_total_conteo.conteo_1)*100),2) AS ratio	
+	ROUND ((SUM (CTE_total_ordenes.total_orden)/SUM (CTE_total_conteo.conteo_1)),3) AS ratio	
 FROM CTE_total_ordenes
 LEFT JOIN CTE_total_conteo
 	ON CTE_total_ordenes.tienda = CTE_total_conteo.tienda
 	GROUP BY CTE_total_ordenes.tienda
-
+	
 -- Por otro lado tambien necesitamos crear y subir a nuestra DB la tabla "return_movements" para poder 
 -- utilizarla en la segunda parte.
 
