@@ -17,7 +17,7 @@ SELECT
 	EXTRACT (month FROM fecha) AS mes_venta,
 	ROUND (SUM (CASE WHEN moneda = 'ARS' THEN OLS.venta / FX.cotizacion_usd_peso
 	WHEN moneda = 'EUR' THEN OLS.venta / FX.cotizacion_usd_eur
-	ELSE OLS.venta / fx.cotizacion_usd_uru END),2) AS ventas_brutas_USD
+	WHEN moneda = 'URU' THEN OLS.venta / fx.cotizacion_usd_uru END),2) AS ventas_brutas_USD
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.monthly_average_fx_rate AS FX 
 	ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
@@ -29,7 +29,7 @@ SELECT
 	EXTRACT (month FROM fecha) AS mes_venta,
 	ROUND (SUM (CASE WHEN moneda = 'ARS' THEN ((ols.venta-OLS.impuestos)/FX.cotizacion_usd_peso)
 	WHEN moneda = 'EUR' THEN ((OLS.venta-OLS.impuestos)/FX.cotizacion_usd_eur)
-	ELSE (OLS.venta-OLS.impuestos)/FX.cotizacion_usd_uru END),2)  AS ventas_netas_USD
+	WHEN moneda = 'URU' THEN ((OLS.venta-OLS.impuestos)/ FX.cotizacion_usd_uru) END),2)  AS ventas_netas_USD
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.monthly_average_fx_rate AS FX
 	ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
@@ -41,7 +41,7 @@ SELECT
 	EXTRACT (month FROM fecha) AS mes_venta,
 	ROUND (SUM (CASE WHEN moneda = 'ARS' THEN (((ols.venta-OLS.descuento)-OLS.impuestos)/FX.cotizacion_usd_peso)
 	WHEN moneda = 'EUR' THEN (((OLS.venta-OLS.descuento)-OLS.impuestos)/FX.cotizacion_usd_eur)
-	ELSE ((OLS.venta-OLS.descuento)-OLS.impuestos)/FX.cotizacion_usd_uru END),2)  AS margen_ventas_USD
+	WHEN moneda = 'URU' THEN (((OLS.venta-OLS.descuento)-OLS.impuestos)/FX.cotizacion_usd_uru) END),2)  AS margen_ventas_USD
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.monthly_average_fx_rate AS FX
 	ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
@@ -98,15 +98,10 @@ GROUP BY categoria
 
 -- AOV (Average order value), valor promedio de la orden.
 
-SELECT 
-	EXTRACT (month FROM fecha) AS mes_venta,
-	ROUND (AVG (CASE WHEN moneda = 'ARS' THEN (ols.venta/FX.cotizacion_usd_peso)
-	WHEN moneda = 'EUR' THEN (OLS.venta/FX.cotizacion_usd_eur)
-	ELSE OLS.venta/FX.cotizacion_usd_uru END),2)  AS AOV_USD
-FROM stg.order_line_sale AS OLS
-LEFT JOIN stg.monthly_average_fx_rate AS FX
-	ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
-GROUP BY mes_venta
+SELECT EXTRACT (MONTH FROM FECHA) AS MES, 
+	SUM (VENTA)/ COUNT (ORDEN) AS AOV
+	FROM STG.ORDER_LINE_SALE OLS
+	GROUP BY MES
 
 -- CONTABILIDAD
 -- Impuestos pagados
@@ -155,15 +150,14 @@ ORDER BY OLS.orden
 -- SUPPLY CHAIN
 -- Costo de inventario promedio por tienda
 
-SELECT
-	tienda,
-	(SUM(inicial)+SUM(final))/2 AS inventario_promedio,
-	((SUM(inicial)+SUM(final))/2) * MAX(C.costo_promedio_usd) AS costo_promedio
-FROM stg.inventory AS INV
-LEFT JOIN stg.cost AS C
-	ON INV.sku = C.codigo_producto
-GROUP BY tienda
-ORDER BY tienda
+select 
+    i.tienda,
+    extract(month from i.fecha) as mes,
+    avg((inicial+final)/2 * c1.costo_promedio_usd) as inventario_promedio_dia
+    from stg.inventory i
+    left join stg.cost c1 on c1.codigo_producto = i.sku
+    group by i.tienda,extract(month from i.fecha) 
+    order by i.tienda
 
 -- Crear tabla "return_movements"
 
@@ -180,13 +174,44 @@ CREATE  TABLE stg.return_movements (
 
 -- Costo del stock de productos que no se vendieron por tienda
 
+WITH costo_inventario AS (
+SELECT 
+    EXTRACT (month FROM i.fecha)AS mes,
+    i.sku,
+    AVG((inicial+final)/2 * c1.costo_promedio_usd) AS cost_usd
+    FROM stg.inventory i
+    LEFT JOIN stg.cost c1 
+    ON c1.codigo_producto = i.sku
+    GROUP BY i.sku, EXTRACT (month FROM i.fecha) 
+), 
+ventas_items AS (
 SELECT
-	sku,
-	sum((INV.final) * (C.costo_promedio_usd)) AS coste_stock
-FROM stg.inventory AS INV
-LEFT JOIN stg.cost AS C
-	ON INV.sku = C.codigo_producto
-GROUP BY sku
+    producto,
+    EXTRACT(month FROM fecha) AS mes,
+    SUM (round(ols.venta/(CASE WHEN moneda = 'EUR' THEN mfx.cotizacion_usd_eur
+    WHEN moneda = 'ARS' THEN mfx.cotizacion_usd_peso
+    WHEN moneda = 'URU' THEN mfx.cotizacion_usd_uru
+    ELSE 0 END),1)) AS venta_bruta_usd
+FROM stg.order_line_sale ols
+LEFT JOIN stg.monthly_average_fx_rate mfx ON EXTRACT(month FROM mfx.mes) = EXTRACT (month FROM ols.fecha) 
+    GROUP BY 1,2
+)
+
+SELECT 
+    COALESCE (i.mes, vi.mes) AS mes, 
+    --coalesce(i.sku, vi.producto) as producto,
+    pm.subcategoria,
+    --cost_usd,
+    --venta_bruta_usd,
+    SUM(COALESCE(venta_bruta_usd,0))/SUM(cost_usd) AS roi
+FROM costo_inventario i
+FULL OUTER JOIN ventas_items vi
+ON i.sku = vi.producto AND vi.mes = i.mes
+LEFT JOIN stg.product_master pm 
+ON COALESCE(i.sku, vi.producto) = pm.codigo_producto
+WHERE COALESCE(i.mes, vi.mes) = 11 -- filtro mes por que es solo el mes que tenemos inventario
+GROUP BY 1,2
+
 
 -- Cantidad y costo de devoluciones
 
@@ -268,5 +293,5 @@ SELECT * FROM stg.tabla_1 AS T1 INNER JOIN stg.tabla_2 AS T2 ON T1.id = T2.id
 
 -- Left Join selecciona todos los registros de la tabla de la izquierda (tabla_1), y los registros que 
 -- coinciden con la tabla de la derecha (tabla_2)
-SELECT * FROM stg.tabla_1 AS T1 LEFT JOIN stg.tabla_2 AS T2 ON T1.id = T2.id 
+SELECT * FROM stg.tabla_1 AS T1 LEFT JOIN stg.tabla_2 AS T2 ON T1.id = T2.id
 
