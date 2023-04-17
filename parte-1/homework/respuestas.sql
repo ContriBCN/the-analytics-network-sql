@@ -14,6 +14,7 @@ FROM stg.product_master
 -- 3.Mostrar todos los productos de Electro ordenados por nombre.
 
 SELECT * FROM stg.product_master
+	WHERE categoria = 'Electro'
 	ORDER BY nombre ASC
 
 -- 4.Cuales son las TV que se encuentran activas para la venta?
@@ -47,13 +48,14 @@ LIMIT 10
 -- 8.Cuales son los producto de electro que no son Soporte de TV ni control remoto.
 
 SELECT * FROM stg.product_master
-	WHERE subsubcategoria <> 'Soporte' AND subsubcategoria <> 'Control remoto'
+	WHERE categoria = 'Electro' 
+		AND subsubcategoria NOT IN ('TV', 'Control Remoto')
 
--- 9.Mostrar todas las lineas de venta donde el monto sea mayor a $100.000 solo para transacciones en pesos.
+-- 9.Mostrar todas las lineas de venta donde el monto sea mayor a $100.000 solo para transacciones en 
+-- pesos.
 
 SELECT	* FROM stg.order_line_sale
-	WHERE	venta > 100.000
-	AND moneda <> 'EUR'
+		WHERE moneda = 'ARS' and venta > 100000
 
 -- 10.Mostrar todas las lineas de ventas de Octubre 2022.
 
@@ -81,12 +83,13 @@ SELECT DISTINCT pais FROM stg.store_master
 SELECT	subcategoria, 
 		COUNT (DISTINCT NOMBRE)  
 FROM	stg.product_master
+WHERE is_active = 'true'
 GROUP BY SUBCATEGORIA
 
 -- 3.Cuales son las ordenes de venta de Argentina de mayor a $100.000?
 
 SELECT * FROM stg.order_line_sale
-WHERE venta >= 100000 
+WHERE venta >= 100000 AND moneda = 'ARS'
 
 -- 4.Obtener los descuentos otorgados durante Noviembre de 2022 en cada una de las monedas?
 
@@ -103,8 +106,9 @@ WHERE moneda = 'EUR'
 
 -- 6.En cuantas ordenes se utilizaron creditos?
 
-SELECT	COUNT (*) AS credit_orders 
-FROM 	stg.order_line_sale
+SELECT	
+	COUNT (DISTINCT ORDEN) AS credit_orders
+FROM 	stg.order_line_sale OLS
 WHERE	creditos IS NOT NULL
 
 -- 7.Cual es el % de descuentos otorgados (sobre las ventas) por tienda?
@@ -117,7 +121,7 @@ ORDER BY descuento
 -- 8.Cual es el inventario promedio por dia que tiene cada tienda?
 
 SELECT	tienda, 
-		AVG((inicial+final)/2) as promedio 
+		ROUND (AVG((inicial+final)/2),2) as promedio 
 FROM stg.inventory 
 GROUP BY tienda
 ORDER BY tienda
@@ -153,14 +157,14 @@ SELECT	SUM (venta),
 FROM stg.order_line_sale 
 GROUP BY tienda, moneda
 
--- 13.ual es el precio promedio de venta de cada producto en las distintas monedas? Recorda que los valores
--- de venta, impuesto, descuentos y creditos es por el total de la linea.
+-- 13.Cual es el precio promedio de venta de cada producto en las distintas monedas? Recorda que los 
+-- valores de venta, impuesto, descuentos y creditos es por el total de la linea.
 
 SELECT	producto, 
-		ROUND ((venta/cantidad),2) AS ventas,
+		ROUND (sum(venta)/sum(cantidad),2) AS ventas,
 		moneda 
 FROM stg.order_line_sale 
-GROUP BY producto, moneda, ventas 
+GROUP BY producto, moneda 
 ORDER BY producto
 
 -- 14.Cual es la tasa de impuestos que se pago por cada orden de venta?
@@ -240,12 +244,13 @@ GROUP BY nombre
 SELECT	
 	SM.nombre,
 	INV.tienda, 
+	EXTRACT (month from inv.fecha) AS mes,
 	ROUND (AVG((inicial+final)/2),2) as inventario_promedio,
 	INV.sku
 FROM stg.inventory AS INV
 LEFT JOIN stg.store_master AS SM
 	ON INV.tienda = SM.codigo_tienda
-GROUP BY nombre, tienda, sku
+GROUP BY nombre, tienda, sku, inv.fecha
 ORDER BY tienda, sku
 
 -- 7.Calcular la cantidad de unidades vendidas por material. Para los productos que no tengan material usar 
@@ -257,9 +262,9 @@ WITH CTE_material AS (
 	when material = 'PLASTICO' THEN 'Plastico'
 	when material = 'plastico' THEN 'Plastico'
 	ELSE material END AS material_group
-	FROM stg.order_line_sale AS OLS
-	LEFT JOIN stg.product_master AS PM
-		ON OLS.producto = PM.codigo_producto
+FROM stg.order_line_sale AS OLS
+LEFT JOIN stg.product_master AS PM
+	ON OLS.producto = PM.codigo_producto
 )
 SELECT material_group, SUM (cantidad)
 FROM CTE_material
@@ -290,25 +295,28 @@ LEFT JOIN stg.monthly_average_fx_rate AS FX
 -- (venta - promociones) - costo expresado en dolares.
 
 SELECT 
+	ROUND (SUM (CASE WHEN moneda = 'ARS' THEN OLS.venta / FX.cotizacion_usd_peso
+	WHEN moneda = 'EUR' THEN OLS.venta / FX.cotizacion_usd_eur
+	ELSE OLS.venta / fx.cotizacion_usd_uru END),2) AS total_ventas_USD,
 	producto,
 	venta-descuento AS margen_USD
 FROM stg.order_line_sale AS OLS
 LEFT JOIN stg.monthly_average_fx_rate AS FX 
 	ON SUBSTRING (CAST(OLS.fecha AS text) FROM 1 FOR 7) = SUBSTRING (CAST(FX.mes AS text)FROM 1 FOR 7)
+GROUP BY producto, margen_USD
 ORDER BY producto DESC
 
 -- 11.Calcular la cantidad de items distintos de cada subsubcategoria que se llevan por numero de orden.
 
 SELECT 
 	orden, 
-	COUNT (DISTINCT subcategoria) 
+	subcategoria,
+	COUNT (DISTINCT producto) 
 FROM stg.order_line_sale OLS
 LEFT JOIN stg.product_master PM
 	ON OLS.producto = PM.codigo_producto
-GROUP BY orden
+GROUP BY orden, subcategoria
 
-
--- Clase 4 de 0 a Messi
 
 -- 1.Crear un backup de la tabla product_master. Utilizar un esquema llamada "bkp" y agregar un prefijo 
 -- al nombre de la tabla con la fecha del backup en forma de numero entero.
@@ -355,14 +363,11 @@ WHERE origen <> 'Argentina'
 
 -- 5.Agregar una nueva columna a la tabla de ventas llamada "line_key" que resulte ser la concatenacion 
 -- de el numero de orden y el codigo de producto.
-
-SELECT 
-	*, 
-	concat (orden , codigo_producto) AS line_key
-INTO bkp.order_line_sale 
-FROM stg.order_line_sale OLS
-LEFT JOIN stg.product_master PM
-	ON OLS.producto = PM.codigo_producto
+	
+ALTER TABLE stg.order_line_sale
+ADD COLUMN line_key varchar;
+UPDATE stg.order_line_sale
+SET line_key = concat(orden,producto)
 	
 -- 6.Eliminar todos los valores de la tabla "order_line_sale" para el POS 1.
 
@@ -391,14 +396,10 @@ CREATE  TABLE bkp.employees (
 --	Ana Valdez, desde 2020-02-21 hasta 2022-03-01, España, Madrid, tienda 8, Jefe Logistica
 --	Fernando Moralez, 2022-04-04, España, Valencia, tienda 9, Vendedor.
 
-INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
-	VALUES ('Juan', 'Perez', '2022-01-01',NULL, '541113869867' , 'Argentina', 'Santa Fe', '2', 'Vendedor')
-INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
-	VALUES ('Catalina', 'Garcia', '2022-03-01', NULL,NULL,'Argentina', 'Buenos Aires', '2', 'Representante Comercial')
-INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
-	VALUES ('Ana', 'Valdez', '2020-02-21' ,'2022-03-01',NULL, 'España', 'Madrid', '8', 'Jefe Logistica')
-INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) 
-	VALUES ('Fernando', 'Moralez', '2022-04-04',NULL, NULL, 'España', 'Valencia', '9', 'Vendedor')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) VALUES ('Juan', 'Perez', '2022-01-01',NULL, '541113869867' , 'Argentina', 'Santa Fe', '2', 'Vendedor')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) VALUES ('Catalina', 'Garcia', '2022-03-01', NULL,NULL,'Argentina', 'Buenos Aires', '2', 'Representante Comercial')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) VALUES ('Ana', 'Valdez', '2020-02-21' ,'2022-03-01',NULL, 'España', 'Madrid', '8', 'Jefe Logistica')
+INSERT INTO bkp.employees (nombre, apellido, fecha_entrada, fecha_salida, telefono, pais, provincia, codigo_tienda, posicion) VALUES ('Fernando', 'Moralez', '2022-04-04',NULL, NULL, 'España', 'Valencia', '9', 'Vendedor')
 
 -- 9.Crear un backup de la tabla "cost" agregandole una columna que se llame "last_updated_ts" que sea 
 -- el momento exacto en el cual estemos realizando el backup en formato datetime.
