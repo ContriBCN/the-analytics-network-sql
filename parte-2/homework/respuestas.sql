@@ -183,3 +183,111 @@ with cte as (
 	from stg.margen_bruto_view)
 		select * from cte
 		where rn = 1
+
+-- Clase 7
+-- 1. Calcular el porcentaje de valores null de la tabla stg.order_line_sale para la columna creditos y 
+-- descuentos. (porcentaje de nulls en cada columna)
+
+select 
+	sum (case when creditos is null then 1 else 0 end) total_null_creditos,
+	sum (case when descuento is null then 1 else 0 end) total_null_descuento,
+	count(1),
+	sum (case when creditos is null then 1 else 0 end)*1.0 / count(1)*1.0 as ratio_null_creditos,
+	sum (case when descuento is null then 1 else 0 end)*1.0 / count(1)*1.0 as ratio_null_descuento
+from stg.order_line_sale
+
+-- 2.La columna "is_walkout" se refiere a los clientes que llegaron a la tienda y se fueron con el producto 
+-- en la mano (es decia habia stock disponible). Responder en una misma query:
+	-- Cuantas ordenes fueron "walkout" por tienda?
+	-- Cuantas ventas brutas en USD fueron "walkout" por tienda?
+	-- Cual es el porcentaje de las ventas brutas "walkout" sobre el total de ventas brutas por tienda?
+	
+with cte_ventas_brutas as (
+	select 
+		tienda,
+		sum(case when moneda = 'ARS' then venta/fx.cotizacion_usd_peso
+	   		 when moneda = 'EUR' then venta/fx.cotizacion_usd_eur
+			 when moneda = 'URU' then venta/fx.cotizacion_usd_uru end) as ventas_brutas
+	from stg.order_line_sale ols
+	left join stg.monthly_average_fx_rate fx
+	on extract (month from fx.mes) = extract (month from ols.fecha)
+	group by tienda
+),
+cte_ventas_walkout as (
+	select 
+		tienda, 
+		count (case when is_walkout = 'true' then 1 else 0 end) as count_walkout,
+		sum(case when moneda = 'ARS' then venta/fx.cotizacion_usd_peso
+	   		 when moneda = 'EUR' then venta/fx.cotizacion_usd_eur
+			 when moneda = 'URU' then venta/fx.cotizacion_usd_uru end) as ventas_walkout
+	from stg.order_line_sale ols
+	left join stg.monthly_average_fx_rate fx
+	on extract (month from fx.mes) = extract (month from ols.fecha)
+	where is_walkout = 'True'
+	group by tienda
+)
+select 
+	cte_ventas_brutas.tienda,
+	sum(count_walkout) as count_walkout,
+	sum(ventas_walkout) as ventas_walkout,
+	sum(ventas_brutas) as ventas_brutas,
+	sum(ventas_walkout) / sum(ventas_brutas) as ratio_ventas_walkout
+from cte_ventas_brutas
+left join cte_ventas_walkout
+on cte_ventas_brutas.tienda = cte_ventas_walkout.tienda
+group by cte_ventas_brutas.tienda
+
+-- 3.Siguiendo el nivel de detalle de la tabla ventas, hay una orden que no parece cumplirlo. Como 
+-- identificarias duplicados utilizando una windows function? Nota: Esto hace referencia a la orden 
+-- M999000061. Tenes que generar una forma de excluir los casos duplicados, para este caso particular y a 
+-- nivel general, si llegan mas ordenes con duplicaciones.
+
+with cte_duplicados as 
+(
+	select 
+		orden, 
+		producto, 
+		row_number() over(partition by orden, producto) as rn 
+	from stg.order_line_sale
+)
+select * from cte_duplicados
+where rn = 1
+
+-- 4.Obtener las ventas totales en USD de productos que NO sean de la categoria "TV" NI esten en tiendas de 
+-- Argentina.
+
+select 
+	ols.tienda,
+	sm.pais,
+	sum (case when moneda = 'EUR' then venta/fx.cotizacion_usd_eur
+		 	  when moneda = 'URU' then venta/fx.cotizacion_usd_uru end) as ventas_brutas 
+from stg.order_line_sale ols
+left join stg.store_master sm
+on ols.tienda = sm.codigo_tienda 
+left join stg.product_master pm
+on ols.producto = pm.codigo_producto
+left join stg.monthly_average_fx_rate fx
+on extract (month from fx.mes) = extract (month from ols.fecha)
+where sm.pais <> 'Argentina' and subcategoria <> 'TV'
+group by ols.tienda, sm.pais
+
+-- 5.El gerente de ventas quiere ver el total de unidades vendidas por dia junto con otra columna con la 
+-- cantidad de unidades vendidas una semana atras y la diferencia entre ambos. Nota: resolver en dos querys 
+-- usando en una CTEs y en la otra windows functions.
+
+with cte_ventas as (
+	select 
+		fecha,
+		count (venta) as cantidad_vendida,
+		sum (venta) as importe_vendido
+	from stg.order_line_sale ols
+	group by fecha
+)
+select 
+	fecha,
+	cantidad_vendida,
+	lag(cantidad_vendida,7) over (order by fecha) as qty_lw,
+	importe_vendido,
+	lag(importe_vendido,7) over (order by fecha) as amount_lw
+from cte_ventas
+
