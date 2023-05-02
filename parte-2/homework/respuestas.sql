@@ -291,3 +291,72 @@ select
 	lag(importe_vendido,7) over (order by fecha) as amount_lw
 from cte_ventas
 
+-- 6.Crear una vista de inventario con la cantidad de inventario por dia, tienda y producto, que ademas va 
+-- a contar con los siguientes datos:
+	-- Nombre y categorias de producto 		
+	-- Pais y nombre de tienda 				
+	-- Costo del inventario por linea (recordar que si la linea dice 4 unidades debe reflejar el costo total 
+	-- de esas 4 unidades)					
+	-- Una columna llamada "is_last_snapshot" para el ultimo dia disponible de inventario. 
+	-- Ademas vamos a querer calcular una metrica llamada "Average days on hand (DOH)" que mide cuantos dias de 
+	-- venta nos alcanza el inventario. Para eso DOH = Unidades en Inventario Promedio / Promedio diario 
+	-- Unidades vendidas ultimos 7 dias.
+-- Notas:
+	-- Antes de crear la columna DOH, conviene crear una columna que refleje el Promedio diario Unidades 
+	-- vendidas ultimos 7 dias.
+	-- El nivel de agregacion es dia/tienda/sku.
+	-- El Promedio diario Unidades vendidas ultimos 7 dias tiene que calcularse para cada dia.
+
+create view stg.inv_dia_tienda_prod as 
+	with cte_promedio as (
+		select			
+			inv.fecha,
+			inv.tienda, 
+			inv.sku,
+			round (avg((inicial+final)/2),2) as promedio_inv
+		from stg.inventory inv
+		group by 	inv.tienda, 
+					inv.sku, 
+					inv.fecha
+	),
+	cte_doh as (
+		select
+			sm.pais,
+			pm.nombre,
+			pm.categoria,
+			ols.fecha,
+			inv.tienda,
+			pm.codigo_producto,
+			avg(ols.cantidad) over (partition by inv.tienda order by inv.fecha rows between 7 preceding and current row)
+				as prom_7dias,
+			last_value (inv.fecha) over (partition by inv.tienda, inv.sku ) as is_last_snapshot 
+		from stg.inventory inv
+		left join stg.product_master pm 
+			on inv.sku = pm.codigo_producto
+		left join stg.store_master sm 
+			on inv.tienda = sm.codigo_tienda
+		left join stg.cost c 
+			on inv.sku = c.codigo_producto
+		left join stg.order_line_sale ols 
+			on ols.producto = inv.sku 
+			and ols.fecha = inv.fecha 
+			and ols.tienda = inv.tienda
+	) 
+	select 
+		cte_promedio.fecha,
+		cte_promedio.tienda,
+		cte_promedio.sku,
+		cte_promedio.promedio_inv,
+		cte_doh.pais,
+		cte_doh.nombre,
+		cte_doh.categoria,
+		cte_doh.prom_7dias,
+		cte_doh.is_last_snapshot,
+		cte_promedio.promedio_inv / cte_doh.prom_7dias
+	from cte_promedio
+	left join cte_doh 
+		on cte_promedio.fecha = cte_doh.fecha
+		and cte_promedio.tienda = cte_doh.tienda
+		and cte_promedio.sku = cte_doh.codigo_producto
+;
+
