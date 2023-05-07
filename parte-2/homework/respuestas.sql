@@ -501,7 +501,27 @@ create view stg.view_return_movements as (
 	-- Fecha del año anterior (date, ejemplo: 2021-01-01 para la fecha 2022-01-01)
 	-- Nota: En general una tabla date es creada para muchos años mas (minimo 10), por el momento nos 
 	-- ahorramos ese paso y de la creacion de feriados.
-	
+
+with recursive cte_date as (
+	select ('2022-01-01'::date) as fecha
+	union
+	select fecha+1 as recursive_fecha
+	from cte_date
+	where fecha+1 <= date ('2024-01-31')
+)
+select 
+	fecha,
+	extract (month from fecha) as mes,
+	extract (year from fecha) as year,
+	to_char (fecha, 'Day') as dia_semana,
+	case when extract (dow from fecha) in (0,6) then True else false end as is_weekend,
+	to_char (fecha, 'Month') as nombre_mes,
+	extract (year from fecha - interval '1 month') as fiscal_year,
+	concat ('FY',extract (year from fecha - interval '1 month')) as fiscal_year2,
+	concat ('Q', extract (quarter from fecha - interval '1 month')) as fiscal_quarter,
+	cast (fecha - interval ' 1 year' as date) as año_anterior
+into stg.date
+from cte_date
 ;
 
 -- CLASE 9
