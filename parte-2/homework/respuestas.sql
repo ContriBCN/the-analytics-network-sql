@@ -183,6 +183,8 @@ with cte as (
 	from stg.margen_bruto_view)
 		select * from cte
 		where rn = 1
+;
+
 
 -- Clase 7
 -- 1. Calcular el porcentaje de valores null de la tabla stg.order_line_sale para la columna creditos y 
@@ -278,18 +280,18 @@ group by ols.tienda, sm.pais
 with cte_ventas as (
 	select 
 		fecha,
-		count (venta) as cantidad_vendida,
-		sum (venta) as importe_vendido
+		sum (cantidad) as qty
 	from stg.order_line_sale ols
 	group by fecha
 )
 select 
-	fecha,
-	cantidad_vendida,
-	lag(cantidad_vendida,7) over (order by fecha) as qty_lw,
-	importe_vendido,
-	lag(importe_vendido,7) over (order by fecha) as amount_lw
+	cte_ventas.fecha,
+	cte_ventas.qty,
+	cte_ventas2.qty,
+	cte_ventas.qty - cte_ventas2.qty as qty_diff
 from cte_ventas
+inner join cte_ventas as cte_ventas2
+	on cte_ventas.fecha = cte_ventas2.fecha - interval '7 days'
 
 -- 6.Crear una vista de inventario con la cantidad de inventario por dia, tienda y producto, que ademas va 
 -- a contar con los siguientes datos:
@@ -308,55 +310,292 @@ from cte_ventas
 	-- El Promedio diario Unidades vendidas ultimos 7 dias tiene que calcularse para cada dia.
 
 create view stg.inv_dia_tienda_prod as 
-	with cte_promedio as (
-		select			
-			inv.fecha,
-			inv.tienda, 
-			inv.sku,
-			round (avg((inicial+final)/2),2) as promedio_inv
-		from stg.inventory inv
-		group by 	inv.tienda, 
-					inv.sku, 
-					inv.fecha
-	),
-	cte_doh as (
-		select
-			sm.pais,
-			pm.nombre,
-			pm.categoria,
-			ols.fecha,
-			inv.tienda,
-			pm.codigo_producto,
-			avg(ols.cantidad) over (partition by inv.tienda order by inv.fecha rows between 7 preceding and current row)
-				as prom_7dias,
-			last_value (inv.fecha) over (partition by inv.tienda, inv.sku ) as is_last_snapshot 
-		from stg.inventory inv
-		left join stg.product_master pm 
-			on inv.sku = pm.codigo_producto
-		left join stg.store_master sm 
-			on inv.tienda = sm.codigo_tienda
-		left join stg.cost c 
-			on inv.sku = c.codigo_producto
-		left join stg.order_line_sale ols 
-			on ols.producto = inv.sku 
-			and ols.fecha = inv.fecha 
-			and ols.tienda = inv.tienda
-	) 
+	with cte_inventario as (
+	select
+		fecha,
+		tienda,
+		sku,
+		(inicial+final/2) as promedio_inv
+	from stg.inventory inv
+),
+cte_ventas as (
 	select 
-		cte_promedio.fecha,
-		cte_promedio.tienda,
-		cte_promedio.sku,
-		cte_promedio.promedio_inv,
-		cte_doh.pais,
-		cte_doh.nombre,
-		cte_doh.categoria,
-		cte_doh.prom_7dias,
-		cte_doh.is_last_snapshot,
-		cte_promedio.promedio_inv / cte_doh.prom_7dias
-	from cte_promedio
-	left join cte_doh 
-		on cte_promedio.fecha = cte_doh.fecha
-		and cte_promedio.tienda = cte_doh.tienda
-		and cte_promedio.sku = cte_doh.codigo_producto
+		fecha,
+		tienda,
+		producto,
+		sum (cantidad) as qty
+	from stg.order_line_sale ols
+	group by 
+		fecha,
+		tienda,
+		producto
+),
+cte_DOH as (
+	select 
+		v1.tienda,
+		v1.producto,
+		v1.fecha,
+		sum (case when v1.fecha - v2.fecha <= 6 then v2.qty else 0 end) as ventas_promedio_7dias
+	from cte_ventas v1
+	left join cte_ventas v2
+		on v1.tienda = v2.tienda
+		and v1.producto = v2.producto
+		and v2.fecha <= v1.fecha
+	group by 
+		v1.tienda,
+		v1.producto,
+		v1.fecha
+)
+select 	inv.*,
+		pm.nombre,
+		pm.categoria,
+		sm.pais,
+		sm.nombre,
+		costo_promedio_usd * promedio_inv as costo_promedio,
+		 ventas_promedio_7dias,
+		inv.promedio_inv / cte_DOH.ventas_promedio_7dias as DOH,
+		case when inv.fecha = (select max (fecha) as is_last_snapshot from stg.inventory)
+			then True else False end as i_last_snapshot
+from cte_inventario inv 
+left join stg.product_master pm
+	on inv.sku = pm.codigo_producto
+left join stg.store_master sm
+	on inv.tienda = sm.codigo_tienda
+left join stg.cost c
+	on inv.sku = c.codigo_producto
+left join cte_DOH
+	on inv.fecha = cte_DOH.fecha
+	and inv.sku = cte_DOH.producto
+	and inv.tienda = cte_DOH.tienda
 ;
 
+-- Clase 8
+-- 1.Realizar el Ejercicio 6 de la clase 6 donde calculabamos la contribucion de las ventas brutas de cada 
+-- producto utilizando una window function.
+
+select
+	orden,
+	producto,
+	sum (venta) as venta_producto_orden,
+	sum (venta) over (partition by orden) as total_venta_producto,
+	sum (venta) / sum (venta) over (partition by orden) as contribucion
+from stg.order_line_sale ols
+group by 
+	orden,
+	producto,
+	venta
+
+-- 2.La regla de pareto nos dice que aproximadamente un 20% de los productos generan un 80% de las ventas. 
+-- Armar una vista a nivel sku donde se pueda identificar por orden de contribucion, ese 20% aproximado de 
+-- SKU mas importantes. (Nota: En este ejercicios estamos construyendo una tabla que muestra la regla de 
+-- Pareto)
+
+with cte_ventas_mes as (		
+	select
+		producto,
+		sum (round (ols.venta / (case
+		when moneda = 'EUR' then fx.cotizacion_usd_eur
+		when moneda = 'ARS' then fx.cotizacion_usd_peso
+		when moneda = 'URU' then fx.cotizacion_usd_uru
+		else 0 end),2)) as venta_bruta_usd
+	from stg. order_line_sale ols
+	left join stg.monthly_average_fx_rate fx
+		on fx.mes = date(date_trunc ('month',ols.fecha))
+	left join stg.cost c
+		on ols.producto = c.codigo_producto
+	group by 1
+),
+cte_venta_acumulada as (
+	select
+		producto, 
+		venta_bruta_usd, 
+		sum (venta_bruta_usd) over (order by venta_bruta_usd asc) as venta_acumulada
+	from cte_ventas_mes
+),
+cte_porcentaje as (
+select
+	vm.producto, 
+	vm.venta_bruta_usd, 
+	va.venta_acumulada,
+	vm.venta_bruta_usd / last_value(va.venta_acumulada) 
+		over () as percentage
+from cte_ventas_mes vm
+left join cte_venta_acumulada va on vm.producto = va.producto
+)
+select
+	producto, 
+	venta_bruta_usd, 
+	percentage,
+	round (sum (percentage) over (order by venta_bruta_usd desc),2) as contribution
+from cte_porcentaje
+order by venta_bruta_usd desc
+
+-- 3.Calcular el crecimiento de ventas por tienda mes a mes, con el valor nominal y el valor % de 
+-- crecimiento.
+
+with cte_ventas as (
+select
+	tienda,
+	sum (venta) as venta_mensual,
+	extract (month from fecha) as mes
+from stg.order_line_sale ols
+group by tienda, mes
+),
+cte_venta_acumulada as (
+select 
+	tienda,
+	mes,
+	venta_mensual,
+	sum (venta_mensual) over (partition by tienda order by venta_mensual asc) as venta_acumulada
+from cte_ventas
+)
+select 
+	tienda,
+	mes,
+	venta_mensual,
+	venta_acumulada,
+	((venta_acumulada - lag(venta_acumulada,1)over()) / 
+	 			lag (venta_mensual,1) over (partition by tienda)) as perct_incremento
+from cte_venta_acumulada
+	
+-- 4.Crear una vista a partir de la tabla "return_movements" que este a nivel Orden de venta, item y que 
+-- contenga las siguientes columnas:
+	-- Orden
+	-- Sku
+	-- Cantidad unidated retornadas
+	-- Valor USD retornado (resulta de la cantidad retornada * valor USD del precio unitario bruto con que 
+	-- se hizo la venta)
+	-- Nombre producto
+	-- Primera_locacion (primer lugar registrado, de la columna "desde", para la orden/producto)
+	-- Ultima_locacion (el ultimo lugar donde se registro, de la columna "hasta", el producto/orden)
+		
+create view stg.view_return_movements as (
+	select distinct
+		orden_venta,
+		item,
+		cantidad,
+		cantidad*c.costo_promedio_usd as valor_usd_retornado,
+		pm.nombre,
+		first_value(desde) over(partition by orden_venta, item order by id_movimiento asc) 
+			as primera_locacion, 
+		last_value(hasta) over(partition by orden_venta, item )as ultima_locacion
+	from stg.return_movements rm
+	left join stg.cost c 
+		on rm.item = c.codigo_producto
+	left join stg.product_master pm 
+		on rm.item = pm.codigo_producto
+);
+
+-- 5.Crear una tabla calendario llamada "date" con las fechas del 2022 incluyendo el año fiscal y trimestre 
+-- fiscal (en ingles Quarter). El año fiscal de la empresa comienza el primero Febrero de cada año y dura 
+-- 12 meses. Realizar la tabla para 2022 y 2023. La tabla debe contener:
+	-- Fecha (date)
+	-- Mes (date)
+	-- Año (date)
+	-- Dia de la semana (text, ejemplo: "Monday")
+	-- "is_weekend" (boolean, indicando si es Sabado o Domingo)
+	-- Mes (text, ejemplo: June)
+	-- Año fiscal (date)
+	-- Año fiscal (text, ejemplo: "FY2022")
+	-- Trimestre fiscal (text, ejemplo: Q1)
+	-- Fecha del año anterior (date, ejemplo: 2021-01-01 para la fecha 2022-01-01)
+	-- Nota: En general una tabla date es creada para muchos años mas (minimo 10), por el momento nos 
+	-- ahorramos ese paso y de la creacion de feriados.
+	
+;
+
+-- CLASE 9
+-- 1.Calcular el crecimiento de ventas por tienda mes a mes, con el valor nominal y el valor % de crecimiento.
+-- Utilizar self join.
+
+with ventas_mes as (
+	select 
+		tienda,
+		extract (month from fecha) as mes,
+		sum (cantidad) as cantidad
+	from stg.order_line_sale ols
+	group by 
+		tienda,
+		mes
+)
+select *,
+	(vm.cantidad - vm2.cantidad) * 1.0 / (vm2.cantidad) * 1.0 as variacion
+from ventas_mes vm
+inner join ventas_mes vm2
+	on vm.tienda = vm2.tienda
+	and vm.mes > vm2.mes
+order by vm.tienda
+
+-- 2.Hacer un update a la tabla de product_master agregando una columna llamada "marca", con la marca de cada
+-- producto con la primer letra en mayuscula. Sabemos que las marcas que tenemos son: Levi's, Tommy Hilfiger, 
+-- Samsung, Phillips, Acer, JBL y Motorola. En caso de no encontrarse en la lista usar 'Unknown'.
+
+alter table stg.product_master add column marca varchar
+
+select *, 
+	case 
+		when lower(nombre) like '%samsung%' then 'Samsung'
+		when lower(nombre) like '%philips%' then 'Phillips'
+		when lower(nombre) like '%levi''s%' then 'Levi''s'
+		when lower(nombre) like '%tommy hilfiger%' then 'Tommy Hilfiger'
+		when lower(nombre) like '%acer%' then 'Acer'
+		when lower(nombre) like '%jbl%' then 'JBL'
+		when lower(nombre) like '%motorola%' then 'Motorola'
+		else 'Unknown'
+		end as marca
+from stg.product_master
+
+-- 3.Un jefe de area tiene una tabla que contiene datos sobre las principales empresas de distintas industrias
+-- en rubros que pueden ser competencia:
+/*
+	empresa			rubro			facturacion
+	El Corte Ingles	Departamental	$110.99B
+	Mercado Libre	ECOMMERCE		$115.86B
+	Fallabela		departamental	$20.46M
+	Tienda Inglesa	Departamental	$10,78M
+	Zara			INDUMENTARIA	$999.98M
+*/
+-- Armar una query que refleje lo siguiente:
+-- Rubro
+-- FacturacionTotal (total de facturación por rubro).
+-- Ordenadas por la columna rubro en orden ascendente.
+-- La columna FacturacionTotal debe estar expresada en millones/billones según corresponda y con 2 decimales 
+-- después de la coma. Los elementos de la columna rubro debe estar expresados en letra minúscula.
+-- Output esperado:
+/*
+	rubro			facturacion_total
+	departamental	111.01B
+	ecommerce		115.86B
+	indumentaria	999.98M
+*/
+
+-- Primero creamos la tabla
+create table stg.datos_empresa (
+			empresa 		varchar,
+			rubro			varchar,
+			facturacion		decimal (18,2)
+	)
+
+-- Insertamos los datos 
+insert into stg.datos_empresa values ('El Corte Ingles','departamental','110990000000000')
+insert into stg.datos_empresa values ('Mercado Libre','ecommerce','115860000000000')
+insert into stg.datos_empresa values ('Fallabela','departamental','20460000')
+insert into stg.datos_empresa values ('Tienda Inglesa','departamental','10780000')
+insert into stg.datos_empresa values ('Zara','indumentaria','998980000')
+
+-- Realizamos la query
+
+with cte as (
+	select 
+		rubro, 
+		sum (facturacion) as total_fra 
+	from stg.datos_empresa 
+	group by rubro
+	order by rubro asc
+)
+select 
+	rubro,
+	case when length((total_fra::text))>12 then concat(round ((total_fra/1000000000000),2),'B')
+	else concat(round ((total_fra/1000000),2),'M') end as fact_total
+from cte
+;
