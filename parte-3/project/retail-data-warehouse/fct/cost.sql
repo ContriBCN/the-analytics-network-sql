@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS stg.cost;
+DROP TABLE IF EXISTS fct.cost;
     
 CREATE TABLE new.cost
                  (
