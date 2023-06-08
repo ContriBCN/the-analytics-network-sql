@@ -1,4 +1,4 @@
-CREATE  TABLE stg.employees (
+CREATE  TABLE fct.employees (
 						id serial primary key,
 						nombre VARCHAR,
 						apellido VARCHAR,
@@ -8,5 +8,7 @@ CREATE  TABLE stg.employees (
 						pais VARCHAR,
 						provincia VARCHAR,
 						codigo_tienda INTEGER,
+						CONSTRAINT codigo_tienda FOREIGN KEY (codigo_tienda)
+							REFERENCES new.store_master,
 						posicion VARCHAR
  );
