@@ -1,4 +1,4 @@
-CREATE TABLE new.monthly_average_fx_rate
+CREATE TABLE fct.monthly_average_fx_rate
                  (
                               mes                 DATE PRIMARY KEY
                             , cotizacion_usd_peso DECIMAL
