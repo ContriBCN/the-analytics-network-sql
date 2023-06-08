@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS stg.date
+CREATE TABLE IF NOT EXISTS new.date
 (
     fecha date,
     mes double precision,
