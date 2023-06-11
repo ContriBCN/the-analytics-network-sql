@@ -1,4 +1,4 @@
-CREATE TABLE public.inventory
+CREATE TABLE stg.inventory
                  (
                               tienda  SMALLINT
                             , sku     VARCHAR(10)
