@@ -1,4 +1,4 @@
-CREATE  TABLE public.employees (
+CREATE  TABLE stg.employees (
 						id serial primary key,
 						nombre VARCHAR,
 						apellido VARCHAR,
