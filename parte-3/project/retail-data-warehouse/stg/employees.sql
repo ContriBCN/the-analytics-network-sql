@@ -1,5 +1,4 @@
-DROP TABLE bkp.employees IF EXISTS;
-CREATE  TABLE stg.employees (
+CREATE  TABLE public.employees (
 						id serial primary key,
 						nombre VARCHAR,
 						apellido VARCHAR,
