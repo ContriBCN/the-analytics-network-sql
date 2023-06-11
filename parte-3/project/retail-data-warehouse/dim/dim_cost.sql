@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS fct.cost;
+DROP TABLE IF EXISTS dim.cost;
     
 CREATE TABLE new.cost
                  (
