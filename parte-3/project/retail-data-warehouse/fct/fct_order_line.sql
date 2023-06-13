@@ -1,6 +1,6 @@
 CREATE TABLE fct.order_line_sale
                  (
-                              orden      VARCHAR(10) PRIMARY KEY
+                              orden      VARCHAR(10) 
                             , producto   VARCHAR(10)
                             , tienda     SMALLINT
                             , fecha      date
@@ -12,4 +12,5 @@ CREATE TABLE fct.order_line_sale
                             , moneda     varchar(3)
                             , pos        SMALLINT
                             , is_walkout BOOLEAN
+				                    , PRIMARY KEY (orden,producto)
                  );
