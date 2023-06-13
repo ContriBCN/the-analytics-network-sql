@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS dim.date
+CREATE TABLE IF NOT EXISTS stg.date
 (
     fecha date,
     mes double precision,
@@ -10,5 +10,6 @@ CREATE TABLE IF NOT EXISTS dim.date
     fiscal_year2 text COLLATE pg_catalog."default",
     fiscal_quarter text COLLATE pg_catalog."default",
     "año_anterior" date,
-    PRIMARY KEY (fecha)
+	id_number serial,
+	primary key (fecha, id_number)
 )
