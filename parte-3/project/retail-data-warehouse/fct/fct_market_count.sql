@@ -3,5 +3,5 @@
                               tienda SMALLINT
                             , fecha  INTEGER 
                             , conteo SMALLINT
-					 , primary key (fecha,tienda)
+			    , primary key (fecha,tienda)
                  );
