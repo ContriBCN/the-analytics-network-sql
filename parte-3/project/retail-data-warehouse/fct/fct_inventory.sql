@@ -5,5 +5,4 @@ CREATE TABLE fct.inventory
                             , fecha   DATE
                             , inicial SMALLINT
                             , final   SMALLINT
-			    , primary key (sku,fecha)
                  );
