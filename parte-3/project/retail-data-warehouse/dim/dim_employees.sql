@@ -8,7 +8,5 @@ CREATE  TABLE dim.employees (
 						pais VARCHAR,
 						provincia VARCHAR,
 						codigo_tienda INTEGER,
-						CONSTRAINT codigo_tienda FOREIGN KEY (codigo_tienda)
-						REFERENCES new.store_master,
 						posicion VARCHAR
  );
