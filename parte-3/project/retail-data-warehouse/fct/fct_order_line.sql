@@ -12,5 +12,4 @@ CREATE TABLE fct.order_line_sale
                             , moneda     varchar(3)
                             , pos        SMALLINT
                             , is_walkout BOOLEAN
-				                    , PRIMARY KEY (orden,producto)
                  );
