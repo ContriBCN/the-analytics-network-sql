@@ -1,5 +1,5 @@
 CREATE  TABLE stg.employees (
-						id serial primary key,
+						id serial,
 						nombre VARCHAR,
 						apellido VARCHAR,
 						fecha_entrada DATE,
