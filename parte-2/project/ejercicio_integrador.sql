@@ -34,6 +34,24 @@
 -- El periodo fiscal de la empresa empieza el primero de febrero.
 -- Las metricas tienen que estar calculadas en dolares.
 
+
+-- Crear una vista con la conversión a USD de las métricas
+create view stg.conversion_usd as (
+	select
+		*,
+		case
+		when moneda = 'EUR' then fx.cotizacion_usd_eur
+		when moneda = 'ARS' then fx.cotizacion_usd_peso
+		when moneda = 'URU' then fx.cotizacion_usd_uru
+		end cotizacion
+	from stg. order_line_sale ols
+	left join stg.monthly_average_fx_rate fx
+		on fx.mes = date(date_trunc ('month',ols.fecha))
+	left join stg.cost c
+		on ols.producto = c.codigo_producto
+);
+
+-- Crear la tabla 
 create table stg.tpintegrador2 as
 with cte_philips as 
 (
