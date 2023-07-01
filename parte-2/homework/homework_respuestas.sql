@@ -502,6 +502,20 @@ create view stg.view_return_movements as (
 	-- Nota: En general una tabla date es creada para muchos años mas (minimo 10), por el momento nos 
 	-- ahorramos ese paso y de la creacion de feriados.
 
+CREATE TABLE IF NOT EXISTS stg.date
+(
+    fecha date,
+    mes double precision,
+    year double precision,
+    dia_semana text,
+    is_weekend boolean,
+    nombre_mes text,
+    fiscal_year double precision,
+    fiscal_year2 text,
+    fiscal_quarter text,
+    "año_anterior" date
+)
+	
 with recursive cte_date as (
 	select ('2022-01-01'::date) as fecha
 	union
