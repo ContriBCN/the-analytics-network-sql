@@ -198,3 +198,15 @@ alter table fct.return_movements
 add constraint fk_codigo_producto
 foreign key (item)
 references dim.product_master (codigo_producto);
+
+-- Parte 3 punto 2
+-- Editar el script de la tabla "employee" para que soporte un esquema de SDC (Slow changing dimension) 
+-- cuyo objetivo debe ser capturar cuales son los empleados activos y el periodo de duracion de cada empleado.
+
+alter table dim.employees add column start_date date;
+alter table dim.employees add column end_date date;
+alter table dim.employees add column is_active boolean
+
+select * from dim.employees
+
+
